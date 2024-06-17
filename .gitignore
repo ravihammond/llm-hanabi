@@ -1,0 +1,4 @@
+*.safetensors
+*/outputs/*
+wandb/*
+__pycache__

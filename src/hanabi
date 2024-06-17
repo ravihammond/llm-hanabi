@@ -1,0 +1,106 @@
+import os
+import jax
+import numpy as np
+from jax import numpy as jnp
+from jaxmarl import make
+from jaxmarl.wrappers.baselines import load_params, LogWrapper
+from jaxmarl.environments.hanabi.pretrained.obl_r2d2_agent import OBLAgentR2D2
+import json
+import argparse
+from jax.experimental.host_callback import call
+
+env = LogWrapper(make('hanabi'))
+
+agent1 = OBLAgentR2D2()
+agent2 = OBLAgentR2D2()
+
+batchify = lambda x: jnp.stack([x[a] for a in env.agents])
+unbatchify = lambda x: {a:x[i] for i,a in enumerate(env.agents)}
+
+@jax.jit
+def run_obl_test(rng, params1, params2):
+    def _env_step(carry, _):
+        rng, env_state, agent1_carry, agent2_carry, last_obs = carry 
+
+        agent_input = (
+            batchify(last_obs),
+            batchify(env.get_legal_moves(env_state.env_state))
+        )
+
+        new_agent1_carry, actions1 = agent1.greedy_act(params1, agent1_carry, agent_input)
+        new_agent2_carry, actions2 = agent2.greedy_act(params2, agent2_carry, agent_input)
+        actions_both = jnp.array([actions1[0], actions2[1]])
+        actions = unbatchify(actions_both)
+        
+        rng, _rng = jax.random.split(rng)
+        new_obs, new_env_state, rewards, dones, infos = env.step(_rng, env_state, actions)
+
+        return (
+            (rng, new_env_state, new_agent1_carry, new_agent2_carry, new_obs), 
+            (infos, rewards, dones)
+        )
+    
+    init_obs, env_state = env.reset(rng)
+    agent1_carry = agent1.initialize_carry(jax.random.PRNGKey(0), batch_dims=(2,))
+    agent2_carry = agent2.initialize_carry(jax.random.PRNGKey(0), batch_dims=(2,))
+
+    _, (infos, rewards, dones) = jax.lax.scan(
+        _env_step, (rng, env_state, agent1_carry, agent2_carry, init_obs), None, args.max_len
+    )
+
+    # compute the metrics of the first episode that is done for each parallel env
+    def first_episode_returns(rewards, dones):
+        first_done = jax.lax.select(jnp.argmax(dones)==0., dones.size, jnp.argmax(dones))
+        first_episode_mask = jnp.where(jnp.arange(dones.size) <= first_done, True, False)
+        return jnp.where(first_episode_mask, rewards, 0.).sum()
+        
+    cum_rewards = first_episode_returns(rewards['__all__'], dones['__all__'])
+
+    first_returned_episode = jnp.nonzero(infos['returned_episode'], size=1)[0][0]
+    returns = infos['returned_episode_returns'][first_returned_episode][0]
+
+    returns = jnp.where(
+        first_returned_episode.any(), returns, cum_rewards
+    )
+
+    return returns
+
+
+def main(args):
+    rng = jax.random.PRNGKey(args.seed)
+    test_rngs = jax.random.split(rng, args.num_games)
+    f = jax.jit(jax.vmap(run_obl_test, in_axes=[0, None, None]))
+
+    file_name1 = args.weight1.split("/")[-1].split(".")[0]
+    file_name2 = args.weight2.split("/")[-1].split(".")[0]
+    params1 = load_params(args.weight1)
+    params2 = load_params(args.weight2)
+
+    returns = f(test_rngs, params1, params2)
+        
+    mean = returns.mean()
+    sem = mean / jnp.sqrt(returns.shape[0])
+
+    print(f"{file_name1} x {file_name2}")
+    print(f"score: {mean:.2f} ± {sem:.2f}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weight1", type=str, required=True)
+    parser.add_argument("--weight2", type=str, default=None)
+    parser.add_argument("--num_games", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max_len", type=int, default=80)
+    args = parser.parse_args()
+
+    if args.weight2 == None:
+        args.weight2 = args.weight1
+
+    return args
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    main(args)
+
