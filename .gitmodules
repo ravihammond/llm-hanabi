@@ -1,0 +1,3 @@
+[submodule "JaxMARL"]
+	path = JaxMARL
+	url = git@github.com:FLAIROx/JaxMARL.git
