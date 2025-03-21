@@ -1,7 +1,3 @@
-from .manual_agent import ManualAgent
-from .llm_agent import LLMAgentBuilder
+from .agent_builder import AgentBuilder
 
-_all_ = [
-    "ManualAgent", 
-    "LLMAgentBuilder",
-]
+_all_ = [ "AgentBuilder"]

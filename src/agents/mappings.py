@@ -23,27 +23,27 @@ ID_TO_ACTION = {
 }
 
 ACTION_TO_ID = {
-    'Discard card in slot 0 from your hand': 0,
-    'Discard card in slot 1 from your hand': 1,
-    'Discard card in slot 2 from your hand': 2,
-    'Discard card in slot 3 from your hand': 3,
-    'Discard card in slot 4 from your hand': 4,
-    'Play card in slot 0 from your hand': 5,
-    'Play card in slot 1 from your hand': 6,
-    'Play card in slot 2 from your hand': 7,
-    'Play card in slot 3 from your hand': 8,
-    'Play card in slot 4 from your hand': 9,
-    'Hint red to teammate': 10,
-    'Hint yellow to teammate': 11,
-    'Hint green to teammate': 12,
-    'Hint white to teammate': 13,
-    'Hint blue to teammate': 14,
-    'Hint rank 1 to teammate': 15,
-    'Hint rank 2 to teammate': 16,
-    'Hint rank 3 to teammate': 17,
-    'Hint rank 4 to teammate': 18,
-    'Hint rank 5 to teammate': 19,
-    'No operation': 20
+    'discard card in slot 0 from your hand': 0,
+    'discard card in slot 1 from your hand': 1,
+    'discard card in slot 2 from your hand': 2,
+    'discard card in slot 3 from your hand': 3,
+    'discard card in slot 4 from your hand': 4,
+    'play card in slot 0 from your hand': 5,
+    'play card in slot 1 from your hand': 6,
+    'play card in slot 2 from your hand': 7,
+    'play card in slot 3 from your hand': 8,
+    'play card in slot 4 from your hand': 9,
+    'hint red to teammate': 10,
+    'hint yellow to teammate': 11,
+    'hint green to teammate': 12,
+    'hint white to teammate': 13,
+    'hint blue to teammate': 14,
+    'hint rank 1 to teammate': 15,
+    'hint rank 2 to teammate': 16,
+    'hint rank 3 to teammate': 17,
+    'hint rank 4 to teammate': 18,
+    'hint rank 5 to teammate': 19,
+    'no operation': 20
 }
 
 ID_TO_CARD = {

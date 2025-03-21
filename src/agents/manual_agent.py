@@ -3,10 +3,13 @@ import sys
 
 from agents.agent import Agent
 
+from agent 
+
 
 class ManualAgent(Agent):
     def __init__(self, env, player_idx):
         Agent.__init__(self, env, player_idx)
+        self.action_history = []
 
     def _act(self, obs, env_state, legal_moves, curr_player, prev_state, prev_action):
         actions = np.array([20, 20])
