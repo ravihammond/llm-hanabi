@@ -3,15 +3,27 @@ import sys
 
 from agents.agent import Agent
 
-from agent 
+from agents.mappings import ID_TO_ACTION
 
 
 class ManualAgent(Agent):
     def __init__(self, env, player_idx):
         Agent.__init__(self, env, player_idx)
         self.action_history = []
+        self.working_memory = []
 
-    def _act(self, obs, env_state, legal_moves, curr_player, prev_state, prev_action):
+    def _act(
+        self,
+        obs,
+        env_state,
+        legal_moves,
+        curr_player,
+        env,
+        prev_state,
+        prev_action,
+        episodic_memory,
+        working_memory
+    ):
         actions = np.array([20, 20])
 
         print("valid actions:", [(a, self._env.action_encoding[a]) for a in np.where(legal_moves[curr_player] == 1)[0]])
@@ -41,5 +53,6 @@ class ManualAgent(Agent):
                 print("Invalid action.")
 
         actions[curr_player] = action
+        self.action_history.append(ID_TO_ACTION[action])
 
         return actions

@@ -18,7 +18,7 @@ from agents.mappings import (
 
 class BaseLLMAgent(Agent):
     def __init__(self, env, player_idx, model_name, verbose):
-        super().__init__(env, player_idx)
+        Agent.__init__(self, env, player_idx)
         self._model_name = model_name
         self._verbose = verbose
         self._chat_agent = self._initialise_chat_agent()
@@ -71,12 +71,13 @@ class BaseLLMAgent(Agent):
             if self._card_to_string(card) != ""
         ]
         obs.fireworks = [
-            self._card_to_string(card)
+            self._card_to_rank(card)
             for card in self._fireworks(state)
         ]
         obs.hand_info = self._get_actor_hand_info(state)
         if state.turn > 0:
             obs.last_action = self._get_last_action(state, prev_state, prev_action)
+        obs.legal_moves = self._extract_legal_moves(state)
 
         return obs
 
@@ -86,6 +87,13 @@ class BaseLLMAgent(Agent):
         color = int(jnp.argmax(card.sum(axis=1), axis=0))
         rank = int(jnp.argmax(card.sum(axis=0), axis=0))
         return f"{ID_TO_COLOUR[color]} {ID_TO_RANK[rank]}"
+
+    def _card_to_rank(self, card: chex.Array) -> int:
+        if ~card.any():
+            return 0
+        color = int(jnp.argmax(card.sum(axis=1), axis=0))
+        rank = int(jnp.argmax(card.sum(axis=0), axis=0))
+        return ID_TO_RANK[rank]
 
     def _fireworks(self, state):
         keep_only_last_one = lambda x: jnp.where(
@@ -201,3 +209,6 @@ class BaseLLMAgent(Agent):
         last_action["reveal_outcome"] = affected_cards
 
         return last_action
+
+    def _extract_legal_moves(self, state):
+        return self._env.get_legal_moves(state)

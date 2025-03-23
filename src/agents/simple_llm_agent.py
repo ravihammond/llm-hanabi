@@ -91,7 +91,6 @@ class SimpleLLMAgent(BaseLLMAgent):
             move = last_action["move_type"]
             self._msg += f"Last Action Type: {move}\n"
 
-
             if move in ["Play", "Discard"]:
                 header = "Play Details:" if move == "Play" else "Discard Details:"
                 self._msg += header + "\n"

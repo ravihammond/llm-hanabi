@@ -47,7 +47,6 @@ class OldLLMAgent(BaseLLMAgent):
         else:
             self.model_type = 'mistral'
 
-
         if self.model_type == 'openai':
             self.client = openai
             # self.client = AzureOpenAI(
@@ -260,60 +259,20 @@ class OldLLMAgent(BaseLLMAgent):
         
     def _get_card_knowledge(self, observation):
         description = f"My cards based on my knowledge: \n"
-        my_cards = [] 
-        c_map = {"R": "Red", "Y": "Yellow", "G": "Green", "W": "White", "B": "Blue"}
-
-        for i, card in enumerate(observation.card_knowledge()[0]):
-            plausible_colors = ['R', 'Y', 'G', 'W', 'B']
-            plausible_ranks = [1,2,3,4,5]
-            card_string = card.__str__()
-
-            plausible_cards = card_string.split("|")[-1]
-
-            plausible_colors = [pc for pc in plausible_colors if str(pc) in plausible_cards]
-
-            plausible_ranks = [pc for pc in plausible_ranks if str(pc) in plausible_cards]
-            
-
-            sure_cards = card_string.split("|")[0]
-            if sure_cards[0] in plausible_colors:
-                plausible_colors = [sure_cards[0]]
-            if sure_cards[1] in plausible_ranks:
-                plausible_ranks = [sure_cards[1]]            
-            # card_combinations = [''.join(map(str, combo)) for combo in itertools.product(plausible_colors, plausible_ranks)]
-            # self.my_card_uncertainty[i] = len(card_combinations)
-            # if len(card_combinations) == 1:
-            #     description += f"Card {i} is: {card_combinations}\n"
-            # else:
-            #     description += f"Card {i} could be: {card_combinations}\n"
-            description += f"Card {i} could be: ["
-            for color in plausible_colors:
-                description += f"{c_map[color]}, "
-            description = description[:-2]
-            description += '] ['
-            
-            
-            for rank in plausible_ranks:
-                description += f"{rank}, "
-            description = description[:-2]
-            description += ']\n'
-            description = description.replace("'", "")
+        for i, card in enumerate(observation.hand_info[self.player_id]):
+            possible_colors = card["possible_colors"]
+            possible_ranks = card["possible_ranks"]
+            colors_str = f"[{', '.join(possible_colors)}]"
+            description += f"Card {i} could be: {colors_str} {possible_ranks}\n"
         add_to_dict_list(self.log_csv_dict, 'My Card Knowledge', description)
-
         return description
 
     def _get_partner_cards(self, observation):
         description = f"I can see {self.player_names[1-self.player_id]}'s Cards are: \n"
-        c_map = {"R": "Red", "Y": "Yellow", "G": "Green", "W": "White", "B": "Blue"}
-        hands = observation.observed_hands()
-        partner_cards = []
-        for i, card in enumerate(hands[-1]):
-            card_color = self.color_map[card._color]
-            card_rank = card._rank + 1
-            description += f"[Card {i}: {c_map[card_color]} {card_rank}]\n"
-            # description += f"Rank: {card_rank}>\n"
-            # partner_cards.append(f"{card_color}{card_rank}")
-        # description += str(partner_cards)
+        partner_id = (self.player_id + 1) % 2
+        for i, card in enumerate(observation.hand_info[partner_id]):
+            card_identity = card["card_identity"]
+            description += f"[Card {i}: {card_identity}]\n"
         add_to_dict_list(self.log_csv_dict, 'Partner Cards', description)
         description = description.replace("'", "")
         return description
@@ -321,49 +280,20 @@ class OldLLMAgent(BaseLLMAgent):
     # Delineating epistemic knowledge 
     def _infer_partner_knowledge(self, observation):
         description = f"{self.player_names[1-self.player_id]}'s Knowledge about {self.partner_pronoun} cards: \n"
-        c_map = {"R": "Red", "Y": "Yellow", "G": "Green", "W": "White", "B": "Blue"}
-        for i, card in enumerate(observation.card_knowledge()[1]):
-            plausible_colors = ['R', 'Y', 'G', 'W', 'B']
-            plausible_ranks = [1,2,3,4,5]
-            card_string = card.__str__()
-
-            plausible_cards = card_string.split("|")[-1]
-
-            plausible_colors = [pc for pc in plausible_colors if str(pc) in plausible_cards]
-
-            plausible_ranks = [pc for pc in plausible_ranks if str(pc) in plausible_cards]
-            
-
-            sure_cards = card_string.split("|")[0]
-            if sure_cards[0] in plausible_colors:
-                plausible_colors = [sure_cards[0]]
-            if sure_cards[1] in plausible_ranks:
-                plausible_ranks = [sure_cards[1]]            
-            # card_combinations = [''.join(map(str, combo)) for combo in itertools.product(plausible_colors, plausible_ranks)]
-            # self.partner_card_uncertainty[i] = len(card_combinations)
-            # if len(card_combinations) == 1:
-            #     description += f"{self.player_names[1-self.player_id]} knows {self.partner_pronoun} Card {i} is: {card_combinations}\n"
-            # else:
-            #     description += f"{self.player_names[1-self.player_id]} believes {self.partner_pronoun} Card {i} could be:  {card_combinations}\n"
-            description += f"{self.player_names[1-self.player_id]} believes {self.partner_pronoun} Card {i} could be: ["
-            for color in plausible_colors:
-                description += f"{c_map[color]}, "
-            description = description[:-2]
-            description += '] ['
-            for rank in plausible_ranks:
-                description += f"{rank}, "
-            description = description[:-2]
-            description += ']\n'
-            description = description.replace("'", "")
+        partner_id = (self.player_id + 1) % 2
+        for i, card in enumerate(observation.hand_info[partner_id]):
+            possible_colors = card["possible_colors"]
+            possible_ranks = card["possible_ranks"]
+            colors_str = f"[{', '.join(possible_colors)}]"
+            description += f"{self.player_names[1-self.player_id]} believes "
+            description += f"{self.partner_pronoun} Card {i} could be: {colors_str} {possible_ranks}\n"
         add_to_dict_list(self.log_csv_dict, 'Partner Card Knowledge', description)
 
         return description
 
-    # def _get_
-
     def _get_legal_moves(self, observation):
         self.transformed = []
-        moves = observation.legal_moves()
+        moves = observation.legal_moves
         cmap = {"R": "Red", "Y": "Yellow", "G": "Green", "W": "White", "B": "Blue"} 
         for enum, move in enumerate(moves):
             move = move.__str__()
@@ -391,15 +321,15 @@ class OldLLMAgent(BaseLLMAgent):
 
     def _get_current_stack(self, observation):
         description = 'Current Stacks: '
-        colors = 'RYGWB'
         color_names = ['Red', 'Yellow', 'Green', 'White', 'Blue']
         stack_state = []
         for i, firework in enumerate(observation.fireworks):
             if firework != "":
-                description += f"{color_names[i]} - {color_names[i]} {firework} "
+                description += f"{color_names[i]} - {color_names[i]} {firework}"
             else:
-                description += f"{color_names[i]} - None "
-        # description += str(stack_state)
+                description += f"{color_names[i]} - None"
+            if i != len(observation.fireworks) - 1:
+                description += ", "
         description += '\n'
         add_to_dict_list(self.log_csv_dict, 'Stack', str(stack_state))
         return description
@@ -409,7 +339,8 @@ class OldLLMAgent(BaseLLMAgent):
         colors = 'RYGWB'
         color_names = ['Red', 'Yellow', 'Green', 'White', 'Blue']
         stack_state = []
-        for i, firework in enumerate(observation.fireworks()):
+        pprint(observation.fireworks)
+        for i, firework in enumerate(observation.fireworks):
             # stack_state.append(f'{colors[i]}{firework+1}')
             if firework != 5:
                 description += f"Only {color_names[i]} {firework+1} can be played on {color_names[i]} stack \n"
@@ -500,7 +431,6 @@ class OldLLMAgent(BaseLLMAgent):
             print(f'''{bcolors.OKGREEN}EPISTEMIC INPUT: ***{self.player_names[1-self.player_id]}'s selected action***: {partners_most_recent_action}\n\nMy current state information: {description}. Note that I have updated my knowledge of my cards based on partner's action. Think step by step about partners action. Think about the action. Think about what it implies. If I should give a clue next, think about what clue I can give my partner.{bcolors.ENDC}''')
             
             epistemic_response_string = self.llm_inference(epistemic_message)
-            
 
             partner_action_inference_description = f"Interpretation of {self.player_names[self.player_id-1]}'s Last Action: {epistemic_response_string}. \n You can use the clue suggestion if giving a hint (reveal) is the next best possible move and ignore it otherwise."
             
@@ -518,16 +448,8 @@ class OldLLMAgent(BaseLLMAgent):
         self.working_memory['stack'] = self._get_current_stack(observation)
         description += self.working_memory['stack']
 
-        print("discription")
-        print(description)
-        print()
-        
         self.working_memory['card_knowledge'] = self._get_card_knowledge(observation)
         description += self.working_memory['card_knowledge']
-
-        print("discription")
-        print(description)
-        print()
 
         self.working_memory['partner_cards'] = self._get_partner_cards(observation)
         description += self.working_memory['partner_cards']
@@ -535,32 +457,36 @@ class OldLLMAgent(BaseLLMAgent):
         self.working_memory['partner_card_knowledge'] = self._infer_partner_knowledge(observation)
         description += self.working_memory['partner_card_knowledge']
 
-        self.working_memory['reveal_tokens'] = f"Remaining Reveal Tokens: {observation.information_tokens()}\n"
+        self.working_memory['reveal_tokens'] = f"Remaining Reveal Tokens: {observation.information_tokens}\n"
         description += self.working_memory['reveal_tokens']
 
-        self.working_memory['lives'] = f"Remaining Lives: {observation.life_tokens()}\n"
+        self.working_memory['lives'] = f"Remaining Lives: {observation.lives}\n"
         description += self.working_memory['lives']
 
-        self.working_memory['deck_size'] = f"Deck Size: {observation.deck_size()}\n"
+        self.working_memory['deck_size'] = f"Deck Size: {observation.cards_in_deck}\n"
         description += self.working_memory['deck_size']
 
-        self.working_memory['discard_pile'] = f"The discard pile is: {observation.discard_pile()}\n"
+        self.working_memory['discard_pile'] = f"The discard pile is: {observation.discards}\n"
         description += self.working_memory['discard_pile']
 
         # description += f'\nInformation: We have {observation.information_tokens()} reveal tokens, {observation.life_tokens()} life tokens. The discard pile consists {observation.discard_pile()} and the deck size is {observation.deck_size()}.\n'
-        add_to_dict_list(self.log_csv_dict, 'Board Information', f"Information: We have {observation.information_tokens()} reveal tokens, {observation.life_tokens()} life tokens. The discard pile consists {observation.discard_pile()} and the deck size is {observation.deck_size()}.")
-        
-        
+        add_to_dict_list(self.log_csv_dict, 'Board Information', f"Information: We have {observation.information_tokens} reveal tokens, {observation.lives} life tokens. The discard pile consists {observation.discards} and the deck size is {observation.cards_in_deck}.")
+
         self.working_memory['previous_selected_actions'] = self._get_previous_selected_actions()
         description += self.working_memory['previous_selected_actions']
         
         self.working_memory['soft_constraints'] = self._add_soft_constraints(observation)
         description += self.working_memory['soft_constraints']
-
         
+        print("\nDescription\n")
+        print(description)
+        print()
         
         self.working_memory['legal_moves'] = self._get_legal_moves(observation)
-        
+
+        print("\nDescription\n")
+        print(description)
+        print()
 
         temp_description = description + self.working_memory['legal_moves']
 
@@ -706,255 +632,3 @@ class OldLLMAgent(BaseLLMAgent):
 
         self.prev_working_memory = self.working_memory.copy()
         return observation.legal_moves()[selected_move_idx]
-
-
-# class LLMAgentHanabiLive(LLMAgent):
-#     def _get_card_knowledge(self, observation):
-#         description = f"My cards based on my knowledge: \n"
-#         my_cards = [] 
-#         for i, card in enumerate(observation["card_knowledge"][0]):
-#             plausible_colors = card["color"]
-#             plausible_ranks = card["rank"]
-#             description += f"Card {i} could be: ["
-#             for color in plausible_colors:
-#                 description += f"{self.c_map[color]}, "
-#             description = description[:-2]
-#             description += '] ['
-#
-#
-#             for rank in plausible_ranks:
-#                 description += f"{int(rank) + 1}, "
-#             description = description[:-2]
-#             description += ']\n'
-#             description = description.replace("'", "")
-#         add_to_dict_list(self.log_csv_dict, 'My Card Knowledge', description)
-#
-#         return description
-#
-#     def _get_partner_cards(self, observation):
-#         description = f"I can see {self.player_names[1-self.player_id]}'s Cards are: \n"
-#         hands = observation["observed_hands"]
-#         partner_cards = []
-#         for i, card in enumerate(hands[-1]):
-#             card_color = card["color"]
-#             card_rank = int(card["rank"]) + 1
-#             description += f"[Card {i}: {self.c_map[card_color]} {card_rank}]\n"
-#         add_to_dict_list(self.log_csv_dict, 'Partner Cards', description)
-#         description = description.replace("'", "") 
-#         return description
-#
-#     # Infer partner knowledge 
-#     def _infer_partner_knowledge(self, observation):
-#         description = f"{self.player_names[1-self.player_id]}'s Knowledge about {self.partner_pronoun} cards: \n"
-#         for i, card in enumerate(observation["card_knowledge"][1]):
-#             plausible_colors = card["color"]
-#             plausible_ranks = card["rank"]
-#
-#             description += f"{self.player_names[1-self.player_id]} believes {self.partner_pronoun} Card {i} could be: ["
-#             for color in plausible_colors:
-#                 description += f"{self.c_map[color]}, "
-#             description = description[:-2]
-#             description += '] ['
-#             for rank in plausible_ranks:
-#                 description += f"{int(rank) + 1}, "
-#             description = description[:-2]
-#             description += ']\n'
-#             description = description.replace("'", "")
-#
-#         add_to_dict_list(self.log_csv_dict, 'Partner Card Knowledge', description)
-#
-#         return description
-#
-#     def convert_pyhanabi_move(self, move):
-#         if move['action_type'] == 'DISCARD':
-#             return f"Discard My Card {move['card_index']}."
-#         elif move['action_type'] == 'PLAY':
-#             return f"Play My Card {move['card_index']}."
-#         elif move['action_type'] == 'REVEAL_COLOR':
-#             return f"Reveal {self.player_names[1-self.player_id]}'s {self.c_map[move['color']]} color cards."
-#         elif move['action_type'] == 'REVEAL_RANK':
-#             return f"Reveal {self.player_names[1-self.player_id]}'s rank {move['rank']} cards."
-#
-#     def convert_pyhanabi_partner_move(self, move):
-#         if move['action_type'] == 'DISCARD':
-#             return f"discarded {move['color']} {move['rank'] + 1} card."
-#         elif move['action_type'] == 'PLAY':
-#             return f"played {move['color']} {move['rank'] + 1} card."
-#         elif move['action_type'] == 'REVEAL_COLOR':
-#             return f"revealed my {move['color']} color cards."
-#         elif move['action_type'] == 'REVEAL_RANK':
-#             return f"revealed my rank {move['rank']+1} cards." 
-#
-#     def _get_legal_moves(self, observation):
-#         self.transformed = []
-#         moves = observation["legal_moves"]
-#
-#         for idx, move in enumerate(moves):
-#             self.transformed.append(f"{chr(65+idx)}. {self.convert_pyhanabi_move(move)}")
-#
-#         description = 'Available Legal Actions: \n'
-#         for tm in self.transformed:
-#             description += tm
-#             description += '\n'
-#         add_to_dict_list(self.log_csv_dict, 'Available Actions', description.replace('#', ''))
-#         return description
-#
-#     def _get_current_stack(self, observation):
-#         description = 'Current Stacks: '
-#         colors = 'RYGWB'
-#         color_names = ['Red', 'Yellow', 'Green', 'White', 'Blue']
-#         stack_state = []
-#         for i, stack_color in enumerate(observation['fireworks']):
-#             description += f"{color_names[i]} - {color_names[i]} {observation['fireworks'][stack_color]} "
-#         description += '\n'
-#         add_to_dict_list(self.log_csv_dict, 'Stack', str(stack_state))
-#         return description
-#
-#     def _add_soft_constraints(self, observation):
-#         description = f'The next playable cards for each stack are: '
-#         colors = 'RYGWB'
-#         color_names = ['Red', 'Yellow', 'Green', 'White', 'Blue']
-#         stack_state = []
-#         for i, firework in enumerate(colors):
-#             if observation['fireworks'][colors[i]] != 4:
-#                 description += f"{color_names[i]} - {color_names[i]} {observation['fireworks'][colors[i]]+1} "
-#             else:
-#                 description += f"{color_names[i]} stack is complete. "
-#
-#         # description += str(stack_state)
-#         add_to_dict_list(self.log_csv_dict, 'Soft Constraints', description)
-#         description += '\n'
-#         return description
-#
-#     def _get_previous_selected_actions(self): 
-#         if len(self.action_history)>0:
-#             add_to_dict_list(self.log_csv_dict, 'Prev Actions', f'My Action History: {", ".join([ac for ac in self.action_history])}')
-#             return f'My Action History: {", ".join([ac for ac in self.action_history])}\n'
-#         else:
-#             add_to_dict_list(self.log_csv_dict, 'Prev Actions', f'My Action History: ')
-#             return ''
-#
-#     ## TODO: Complete this 
-#     def _infer_partner_action(self, partner_action, description):
-#         partner_action_inference_description = ''
-#         if partner_action is not None:
-#             print("PARTNER's MOVE: ", partner_action)
-#             partner_move_string = self.convert_pyhanabi_partner_move(partner_action)
-#             print("PARTNER's MOVE: ", partner_move_string)
-#             epistemic_message = self.epistemologist_message + [{"role": "user", "content": f"***{self.player_names[1-self.player_id]}'s selected action***: {self.player_names[1-self.player_id]} {partner_move_string}\n\nMy current state information: {description}. Note that I have updated my knowledge of my cards based on partner's action. Think step by step about partners action. Think about the action. Think about what it implies. If I should give a clue next, think about what clue I can give my partner."}]
-#             epistemic_response_string = self.llm_inference(epistemic_message)
-#             partner_action_inference_description = f"Interpretation of {self.player_names[self.player_id-1]}'s Last Action: {epistemic_response_string}. \n"
-#             self.partner_action_inference_string = partner_action_inference_description
-#         return partner_action_inference_description
-#
-#     def _get_discard_pile(self, observation):
-#         cards = ''
-#         for card in observation['discard_pile']:
-#             cards += f'{self.c_map[card["color"]]} {int(card["rank"])+1}, '
-#         description = f"{cards}\n"
-#         return description
-#
-#     def _observation_to_description(self, observation, partner_action):
-#         self.working_memory['turn'] = f'It is currently My ({self.player_names[self.player_id]}) turn. '
-#         description = self.working_memory['turn']
-#
-#         self.working_memory['stack'] = self._get_current_stack(observation)
-#         description += self.working_memory['stack']
-#
-#         self.working_memory['card_knowledge'] = self._get_card_knowledge(observation)
-#         description += self.working_memory['card_knowledge']
-#
-#         self.working_memory['partner_cards'] = self._get_partner_cards(observation)
-#         description += self.working_memory['partner_cards']
-#
-#         self.working_memory['partner_card_knowledge'] = self._infer_partner_knowledge(observation)
-#         description += self.working_memory['partner_card_knowledge']
-#
-#         self.working_memory['reveal_tokens'] = f"Remaining Reveal Tokens: {observation['information_tokens']}\n"
-#         description += self.working_memory['reveal_tokens']
-#
-#         self.working_memory['lives'] = f"Remaining Lives: {observation['life_tokens']}\n"
-#         description += self.working_memory['lives']
-#
-#         self.working_memory['deck_size'] = f"Deck Size: {observation['deck_size']}\n"
-#         description += self.working_memory['deck_size']
-#
-#         self.working_memory['discard_pile'] = f"The discard pile is: {self._get_discard_pile(observation)}\n"
-#         description += self.working_memory['discard_pile']
-#
-#         # description += f'\nInformation: We have {observation.information_tokens()} reveal tokens, {observation.life_tokens()} life tokens. The discard pile consists {observation.discard_pile()} and the deck size is {observation.deck_size()}.\n'
-#         add_to_dict_list(self.log_csv_dict, 'Board Information', f"Information: We have {self.working_memory['reveal_tokens']} reveal tokens, {self.working_memory['lives']} lives. The discard pile consists {self.working_memory['discard_pile']} and the deck size is {self.working_memory['deck_size']}.")
-#
-#         self.working_memory['previous_selected_actions'] = self._get_previous_selected_actions()
-#         description += self.working_memory['previous_selected_actions']
-#
-#         self.working_memory['soft_constraints'] = self._add_soft_constraints(observation)
-#         description += self.working_memory['soft_constraints']
-#
-#         self.working_memory['partner_interpretation'] = self._infer_partner_action(partner_action, description)
-#         description += self.working_memory['partner_interpretation']
-#
-#         self.working_memory['legal_moves'] = self._get_legal_moves(observation)
-#         description += self.working_memory['legal_moves']
-#
-#         return description
-#
-#     def get_next_move(self, observation, partner_action):
-#
-#         # Print current player 
-#         print("Current Player is: ", self.player_names[self.player_id])
-#
-#         # This description is for the action generator 
-#         generator_description = self._observation_to_description(observation, partner_action)
-#         print(generator_description)
-#
-#         # prepare generator message 
-#         self.generator_message = self.base_message + [{"role": "user", "content": generator_description}]
-#
-#         # log
-#         add_to_dict_list(self.log_csv_dict, 'State', generator_description)
-#         add_to_dict_list(self.log_csv_dict, 'Message', self.generator_message)
-#
-#
-#         if len(self.player_actions) > 0:
-#             selected_move = self.player_actions.pop(0)
-#         else:
-#             # Generate initial player action 
-#             action_string = self.llm_inference(self.generator_message)
-#             print(f'''{bcolors.WARNING}LLM RESPONSE: {action_string}{bcolors.ENDC}''')
-#             selected_move = self.find_best_match(action_string)
-#
-#
-#             # Initial verification 
-#             verification_response_string = ''
-#             verifier_responses = []
-#             verifier_description = f"State: {generator_description.replace(self.partner_action_inference_string, '')}\n\n My Solution: {selected_move}. Think step by step. Think about rules, think about conventions, and think about safety. " # https://arxiv.org/pdf/2401.04925.pdf
-#             print(f'''{bcolors.WARNING}VERIFIER INPUT: {verifier_description}{bcolors.ENDC}''')
-#             self.verifier_message = self.verifier_base_message + [{"role": "user", "content": verifier_description}]
-#             verification_response_string = self.llm_inference(self.verifier_message)
-#             verifier_responses.append(verification_response_string)
-#             print(f'''{bcolors.OKCYAN}VERIFICATION RESPONSE: {verification_response_string}{bcolors.ENDC}''')
-#             counter = 0 
-#
-#             # Repeat generation and verification, till verification: okay
-#             while 'verification: okay' not in verification_response_string.lower():   
-#                 counter += 1
-#
-#                 # Add verifier feedback to generator messages 
-#                 self.generator_message.append({"role": "assistant", "content": action_string})
-#                 updated_generator_message = f"Your selected action: {selected_move} is not appropriate. {verification_response_string}. Please choose another action. List of Available Actions:\n"
-#
-#                 # Remove the action that was rejected from the list of available actions 
-#                 for tm in self.transformed:
-#                     if tm.lower() != selected_move.lower():
-#                         updated_generator_message += tm 
-#                         updated_generator_message += '\n'
-#                 self.generator_message.append({"role": "user", "content": updated_generator_message})
-#
-#                 # Generate a new action 
-#                 action_string = self.llm_inference(self.generator_message)
-#                 print(f"{bcolors.WARNING}LLM CORRECTED RESPONSE: {action_string}{bcolors.ENDC}") 
-#                 selected_move = self.find_best_match(action_string)
-#
-#                 # Verify new action 
-#                 self.verifier_message[-1]["content"] = f"State: {generator_description.replace(self.partner_action_inference_string, '')}\n\n My Solution: {selected_move}. Think step by step. Think about rules, think about conventions, and think about safety. "
