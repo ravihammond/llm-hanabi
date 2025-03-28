@@ -1,3 +1,4 @@
+import json
 import jax
 from jax import numpy as jnp
 import numpy as np
@@ -22,7 +23,6 @@ class BaseLLMAgent(Agent):
         self._model_name = model_name
         self._verbose = verbose
         self._chat_agent = self._initialise_chat_agent()
-        self._msg = ""
 
     def _initialise_chat_agent(self):
         return LLMModelWrapper(self._system_message(), model=self._model_name)
@@ -30,26 +30,20 @@ class BaseLLMAgent(Agent):
     def _system_message(self):
         return NotImplementedError
 
-    def _step(self, no_print=False):
-        result =  self._chat_agent.step(self._msg)
-        self._step_print(result, no_print)
-        self._msg = ""
+    def _step(self, agent, prompt, agent_name) -> str:
+        result = agent.step(prompt, self._verbose, agent_name)
         return result
 
-    def _step_print(self, result, no_print):
-        if no_print:
-            return
-        if self._verbose >= 2:
-            print(f"\n<Player {self._player_idx} Instruction>")
-            print(f"{self._msg}")
-        if self._verbose >= 1:
-            print(dedent(
-                f"\n<Player {self._player_idx} Response>"
-            ))
-            print(f"{result}")
+    def _parse_response(self, response_text, key):
+        try:
+            result = json.loads(response_text)
+            return result.get(key, "")
+        except Exception as e:
+            print(f"Error parsing response for key '{key}': {e}")
+            exit()
 
     def _choose_name_instructions(self):
-        self._msg += dedent(
+        return dedent(
             "Your response needs to be valid JSON that contains two keys. "
             "The first key is 'action', and the value is one of the valid "
             f"ations you have chosen to take. And the second key "

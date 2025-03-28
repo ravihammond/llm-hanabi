@@ -13,6 +13,12 @@ from dotenv import load_dotenv
 from pprint import pprint
 
 from agents.base_llm_agent import BaseLLMAgent
+from agents.mappings import (
+    ACTION_ID_TO_HINT,
+    ACTIONS_TRANSFORMED,
+    ID_TO_ACTION_TYPE,
+    ACTION_ID_TO_CARD_POSITION
+)
 
 def add_to_dict_list(dictionary, key, item):
     if key not in dictionary:
@@ -174,8 +180,7 @@ class OldLLMAgent(BaseLLMAgent):
         # {self.rules}          
         # I am {self.player_names[self.player_id]}, playing the card game Hanabi with {self.player_names[1-self.player_id]}. We have agreed to follow these conventions: 
         # {self.conventions}.
-        # You are an action verification agent for games. I will provide you with an action and you need to check whether the action satisfies the criteria: 1. Rule Following: It follows to the rules of the game. 2. Convention Following: It adheres to the mentioned conventions. 3. Safety: It won't lead to the game ending immediately. Think about the action, the current state of the stack and the available lives and reveal tokens. End you response with "Verification: Okay" if selected action follows ***all three*** criteria and "Verification: Not Okay" otherwise. Restrict your response to 4-5 sentences.'''
-        ###
+        # You are an action verification agent for games. I will provide you with an action and you need to check whether the action satisfies the criteria: 1. Rule Following: It follows to the rules of the game. 2. Convention Following: It adheres to the mentioned conventions. 3. Safety: It won't lead to the game ending immediately. Think about the action, the current state of the stack and the available lives and reveal tokens. End you response with "Verification: Okay" if selected action follows ***all three*** criteria and "Verification: Not Okay" otherwise. Restrict your response to 4-5 sentences.''' ###
         
         ###
         # self.epistemologist_base_prompt = f'''The card game Hanabi has the following rules:
@@ -293,25 +298,23 @@ class OldLLMAgent(BaseLLMAgent):
 
     def _get_legal_moves(self, observation):
         self.transformed = []
-        moves = observation.legal_moves
-        cmap = {"R": "Red", "Y": "Yellow", "G": "Green", "W": "White", "B": "Blue"} 
-        for enum, move in enumerate(moves):
-            move = move.__str__()
-            move = move.replace('(', '').replace(')', '')
-            parts = move.split(' ')
-            action = parts[0]
-            ord = chr(enum + 65)
+        moves = observation.legal_moves[f"agent_{self.player_id}"]
+        # order = 0
+        for action_id, action_is_legal in enumerate(moves):
+            if not action_is_legal:
+                continue
 
-            if action == 'Discard' or action == 'Play':
-                self.transformed.append(f"{ord}. {action} My Card {parts[1]}.")
-            elif action == 'Reveal':
-                player = parts[2]
-                attribute = parts[3]
-                value = parts[4]
-                if attribute == 'color':
-                    self.transformed.append(f"{ord}. Reveal {self.player_names[1-self.player_id]}'s {cmap[value]} color cards.")
-                elif attribute == 'rank':
-                    self.transformed.append(f"{ord}. Reveal {self.player_names[1-self.player_id]}'s rank {value} cards.")
+            action_type = ID_TO_ACTION_TYPE[action_id]
+            # ord_ch = chr(order + 65)
+            ord_ch = chr(action_id + 65)
+            if action_type == "Discard" or action_type == "Play":
+                card_position = ACTION_ID_TO_CARD_POSITION[action_id]
+                self.transformed.append(f"{ord_ch}. {action_type} My Card {card_position}.")
+            elif action_type == 'Hint Color':
+                self.transformed.append(f"{ord_ch}. Reveal {self.player_names[1-self.player_id]}'s {ACTION_ID_TO_HINT[action_id]} color cards.")
+            elif action_type == 'Hint Rank':
+                self.transformed.append(f"{ord_ch}. Reveal {self.player_names[1-self.player_id]}'s rank {ACTION_ID_TO_HINT[action_id]} cards.")
+            # order += 1
         description = 'Available Legal Actions: \n'
         for tm in self.transformed:
             description += tm
@@ -339,7 +342,6 @@ class OldLLMAgent(BaseLLMAgent):
         colors = 'RYGWB'
         color_names = ['Red', 'Yellow', 'Green', 'White', 'Blue']
         stack_state = []
-        pprint(observation.fireworks)
         for i, firework in enumerate(observation.fireworks):
             # stack_state.append(f'{colors[i]}{firework+1}')
             if firework != 5:
@@ -469,7 +471,6 @@ class OldLLMAgent(BaseLLMAgent):
         self.working_memory['discard_pile'] = f"The discard pile is: {observation.discards}\n"
         description += self.working_memory['discard_pile']
 
-        # description += f'\nInformation: We have {observation.information_tokens()} reveal tokens, {observation.life_tokens()} life tokens. The discard pile consists {observation.discard_pile()} and the deck size is {observation.deck_size()}.\n'
         add_to_dict_list(self.log_csv_dict, 'Board Information', f"Information: We have {observation.information_tokens} reveal tokens, {observation.lives} life tokens. The discard pile consists {observation.discards} and the deck size is {observation.cards_in_deck}.")
 
         self.working_memory['previous_selected_actions'] = self._get_previous_selected_actions()
@@ -477,16 +478,10 @@ class OldLLMAgent(BaseLLMAgent):
         
         self.working_memory['soft_constraints'] = self._add_soft_constraints(observation)
         description += self.working_memory['soft_constraints']
-        
-        print("\nDescription\n")
-        print(description)
-        print()
-        
+
         self.working_memory['legal_moves'] = self._get_legal_moves(observation)
 
-        print("\nDescription\n")
-        print(description)
-        print()
+        print(self.working_memory['legal_moves'])
 
         temp_description = description + self.working_memory['legal_moves']
 
@@ -494,7 +489,7 @@ class OldLLMAgent(BaseLLMAgent):
 
         description += self.working_memory['partner_interpretation']
         description += self.working_memory['legal_moves']
-        
+
         return description
         
     def llm_inference(self, message):
@@ -510,6 +505,7 @@ class OldLLMAgent(BaseLLMAgent):
         return response_string
 
     def find_best_match(self, action_string):
+        print("find_best_match, action_string: ", action_string)
         match = re.search(self.action_regex, action_string.strip())
         if match:
             selected_match = match.group(1).strip().lower()
@@ -522,6 +518,8 @@ class OldLLMAgent(BaseLLMAgent):
                     selected_match = match.group(1).strip().lower()
             ####
                 
+            print("self.transformed: ", self.transformed)
+            print("selected_match", selected_match)
             selected_move, score = process.extractOne(selected_match, self.transformed)
         else:
             selected_move = np.random.choice(self.transformed)
@@ -550,9 +548,6 @@ class OldLLMAgent(BaseLLMAgent):
         # This description is for the action generator 
         observation = self._state_to_obs(state, prev_state, prev_action)
         generator_description = self._observation_to_description(observation, episodic_memory, working_memory)
-        print(generator_description)
-
-        # self.working_memory = generator_description.replace(self.partner_action_inference_string, '')
 
         self.generator_message = self.base_message + [{"role": "user", "content": generator_description}]
 
@@ -572,11 +567,14 @@ class OldLLMAgent(BaseLLMAgent):
             verification_response_string = ''
             verifier_responses = []
             verifier_description = f"State: {generator_description.replace(self.partner_action_inference_string, '')}\n\n My Solution: {selected_move}. Think step by step. Think about rules, think about conventions, and think about safety. " # https://arxiv.org/pdf/2401.04925.pdf
+
             print(f'''{bcolors.WARNING}VERIFIER INPUT: {verifier_description}{bcolors.ENDC}''')
             self.verifier_message = self.verifier_base_message + [{"role": "user", "content": verifier_description}]
             verification_response_string = self.llm_inference(self.verifier_message)
             verifier_responses.append(verification_response_string)
+
             print(f'''{bcolors.OKCYAN}VERIFICATION RESPONSE: {verification_response_string}{bcolors.ENDC}''')
+
             counter = 0 
             while 'verification: okay' not in verification_response_string.lower():   
                 counter += 1
@@ -588,6 +586,7 @@ class OldLLMAgent(BaseLLMAgent):
                         updated_generator_message += '\n'
 
                 self.generator_message.append({"role": "user", "content": updated_generator_message})
+                print("updated_generator_message:", updated_generator_message)
 
                 action_string = self.llm_inference(self.generator_message)
                 print(f"{bcolors.WARNING}LLM CORRECTED RESPONSE: {action_string}{bcolors.ENDC}") 
@@ -597,9 +596,11 @@ class OldLLMAgent(BaseLLMAgent):
                 #     break 
 
                 # self.verifier_message.append({"role": "assistant", "content": verification_response_string})
-                # self.verifier_message.append({"role": "user", "content": f"New Solution: {selected_move}. "})
-                self.verifier_message[-1]["content"] = f"State: {generator_description.replace(self.partner_action_inference_string, '')}\n\n My Solution: {selected_move}. Think step by step. Think about rules, think about conventions, and think about safety. "
-                print(self.verifier_message)
+                # self.verifier_message.append({"role": "user", "content":f"New Solution: {selected_move}. "})
+                self.verifier_message[-1]["content"] = f"State: {generator_description.replace(self.partner_action_inference_string, '')}\n\nMy Solution: {selected_move}. Think step by step. Think about rules, think about conventions, and think about safety. "
+                print("=========================")
+                pprint(self.verifier_message)
+                print("=========================")
                 verification_response_string = self.llm_inference(self.verifier_message)
                 verifier_responses.append(verification_response_string) 
                 print(f'''{bcolors.OKCYAN}VERIFICATION RESPONSE: {verification_response_string}{bcolors.ENDC}''')
@@ -609,17 +610,24 @@ class OldLLMAgent(BaseLLMAgent):
 
         add_to_dict_list(self.log_csv_dict, 'Generator Response', action_string) 
         add_to_dict_list(self.log_csv_dict, 'Selected Action', selected_move)
+        print("Generator Response:")
+        print(action_string)
+        print()
+        print("Selected Action:", selected_move)
         self.action_history.append(selected_move.title())
         selected_move_idx = 0
-        # for move in self.transformed:
-        #     if selected_move == move.lower():
-        #         selected_move_idx = self.transformed.index(move)
-        #         break 
-        final_selection, score = process.extractOne(selected_move, self.transformed)
-        selected_move_idx = self.transformed.index(final_selection)
+        # print("self.tramsformed:", self.transformed)
+        print("ACTIONS_TRANSFORMED:", ACTIONS_TRANSFORMED)
+        # final_selection, score = process.extractOne(selected_move, self.transformed)
+        final_selection, score = process.extractOne(selected_move, ACTIONS_TRANSFORMED)
+        print("final_selection:", final_selection)
+        # selected_move_idx = self.transformed.index(final_selection)
+        selected_move_idx = ACTIONS_TRANSFORMED.index(final_selection)
+        print("selected_move_idx:", selected_move_idx)
 
         # print('Hanabi Selected Move: ', observation.legal_moves()[selected_move_idx]) 
-        add_to_dict_list(self.log_csv_dict, 'Selected Action in Hanabi Space', observation.legal_moves()[selected_move_idx])
+        legal_moves = observation.legal_moves[f"agent_{self.player_id}"]
+        add_to_dict_list(self.log_csv_dict, 'Selected Action in Hanabi Space', legal_moves)
 
         df = pd.DataFrame(self.log_csv_dict)
 
@@ -631,4 +639,7 @@ class OldLLMAgent(BaseLLMAgent):
             np.save(f'{self.traj_dir}/{self.player_names[self.player_id]}_Mixtral_{self.time_stamp}.npy', self.action_history)
 
         self.prev_working_memory = self.working_memory.copy()
-        return observation.legal_moves()[selected_move_idx]
+        actions = np.array([20,20])
+        actions[self.player_id] = selected_move_idx
+        # return legal_moves[selected_move_idx]
+        return actions

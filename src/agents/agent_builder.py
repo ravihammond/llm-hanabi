@@ -4,11 +4,19 @@ from agents.simple_llm_agent import SimpleLLMAgent
 from agents.self_verif_llm_agent import SelfVerifLLMAgent
 
 class AgentBuilder():
-    def __init__(self, env, player_idx, model_name, verbose=1) -> None:
+    def __init__(
+        self,
+        env,
+        player_idx,
+        model_name,
+        verbose=1,
+        self_verification=0
+    ) -> None:
         self._env = env
         self._player_idx = player_idx
         self._model_name = model_name
         self._verbose = verbose
+        self._self_verification = self_verification
 
     def build(self, version):
         if version == "manual":
@@ -21,7 +29,8 @@ class AgentBuilder():
                 self._env,
                 self._player_idx,
                 self._model_name,
-                self._verbose
+                self._verbose,
+                self._self_verification,
             )
         elif version == "llm_self_verif":
             return SelfVerifLLMAgent(

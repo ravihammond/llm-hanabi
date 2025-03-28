@@ -1,6 +1,6 @@
-HANABI_RULES = """\
-You are playing the card game Hanabi, the 2 player variant. Every turn I will give you the state of the game and your hand. You will then need to provide an action based on the state of the game, and then you need to choose an action to take. 
+PLAYER_SYSTEM_MESSAGE = "You are playing the card game Hanabi, the 2 player variant. Every turn I will give you the state of the game and your hand. You will then need to provide an action based on the state of the game, and then you need to choose an action to take."
 
+HANABI_RULES = """\
 Here are full rules of Hanabi:
 
 Overview and Objective:
@@ -94,9 +94,4 @@ When a player takes an action, here are all of the possible actions they make ta
   - Hint rank 3 to teammate
   - Hint rank 4 to teammate
   - Hint rank 5 to teammate
-
-Here are some notes for playing well:
-  - Do not take a risk and play a card unless you are certain it is the correct card to play. Play very safely. If you accidentally play the wrong card, you will lose a fuse token (a life), and the game would end if you lose all 3 fuse tokens.
-  - A card is only playable if it is exactly the next card to be played on the fireworks pile.
-  - If a card has recieved one hint, it may not necissarily be a card that will go on one of the firworks piles. Before deciding to play, look at all of the Inferred Possibilities for that card to see if it is a card that can be played.
 """

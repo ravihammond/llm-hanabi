@@ -17,21 +17,18 @@ class Agent(ABC):
         curr_player,
         prev_state,
         prev_action,
-        episodic_memory,
-        working_memory
     ):
         obs = batchify(obs, self._env)
         legal_moves = batchify(legal_moves, self._env)
+        if curr_player != self._player_idx:
+            return np.array([20, 20])
         actions = self._act(
             obs,
             env_state,
             legal_moves,
             curr_player,
-            self._env,
             prev_state,
             prev_action,
-            episodic_memory,
-            working_memory
         )
         return actions
 
@@ -41,11 +38,8 @@ class Agent(ABC):
         state,
         legal_moves,
         curr_player,
-        env,
         prev_state,
         prev_action,
-        episodic_memory,
-        working_memory
     ):
         return NotImplementedError
 

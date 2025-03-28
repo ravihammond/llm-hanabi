@@ -45,6 +45,78 @@ ACTION_TO_ID = {
     'hint rank 5 to teammate': 19,
     'no operation': 20
 }
+ACTIONS_TRANSFORMED = [
+    "A. Discard My Card 0.",
+    "B. Discard My Card 1.",
+    "C. Discard My Card 2.",
+    "D. Discard My Card 3.",
+    "E. Discard My Card 4.",
+    "F. Play My Card 0.",
+    "G. Play My Card 1.",
+    "H. Play My Card 2.",
+    "I. Play My Card 3.",
+    "J. Play My Card 4.",
+    "K. Reveal Bob's Red color cards.",
+    "L. Reveal Bob's Yellow color cards.",
+    "M. Reveal Bob's Green color cards.",
+    "N. Reveal Bob's White color cards.",
+    "O. Reveal Bob's Blue color cards.",
+    "P. Reveal Bob's rank 1 cards.",
+    "Q. Reveal Bob's rank 2 cards.",
+    "R. Reveal Bob's rank 3 cards.",
+    "S. Reveal Bob's rank 4 cards.",
+    "T. Reveal Bob's rank 5 cards.",
+]
+
+ID_TO_ACTION_TYPE = {
+    0: "Discard",
+    1: "Discard",
+    2: "Discard",
+    3: "Discard",
+    4: "Discard",
+    5: "Play",
+    6: "Play",
+    7: "Play",
+    8: "Play",
+    9: "Play",
+    10: "Hint Color",
+    11: "Hint Color",
+    12: "Hint Color",
+    13: "Hint Color",
+    14: "Hint Color",
+    15: "Hint Rank",
+    16: "Hint Rank",
+    17: "Hint Rank",
+    18: "Hint Rank",
+    19: "Hint Rank",
+    20: "No Operation",
+}
+
+ACTION_ID_TO_CARD_POSITION = {
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 4,
+    5: 0,
+    6: 1,
+    7: 2,
+    8: 3,
+    9: 4,
+}
+
+ACTION_ID_TO_HINT = {
+    10: "Red",
+    11: "Yellow",
+    12: "Green",
+    13: "White",
+    14: "Blue",
+    15: 1,
+    16: 2,
+    17: 3,
+    18: 4,
+    19: 5,
+}
 
 ID_TO_CARD = {
     0: "Red 1",

@@ -65,9 +65,6 @@ def run_game(args):
 
             curr_player = np.where(env_state.cur_player_idx == 1)[0][0]
 
-            episodic_memory = [agents[0].action_history, agents[1].action_history]
-            working_memory = [agents[0].working_memory, agents[1].working_memory]
-
             actions_all = [
                 agents[i].act(
                     obs,
@@ -76,8 +73,6 @@ def run_game(args):
                     curr_player,
                     prev_state,
                     prev_action,
-                    episodic_memory,
-                    working_memory,
                 )
                 for i in range(len(env.agents))
             ]
@@ -120,7 +115,7 @@ def get_agents(args, env):
         agent_type = getattr(args, f"agent{player_idx}")
         model_name = getattr(args, f"model{player_idx}")
         agents.append(AgentBuilder(
-            env, player_idx, model_name, args.verbose
+            env, player_idx, model_name, args.verbose, args.self_verif
         ).build(agent_type))
 
     return agents
@@ -134,6 +129,7 @@ def parse_args():
     parser.add_argument("--model", type=str, default="None")
     parser.add_argument("--model0", type=str, default="gpt-3.5-turbo")
     parser.add_argument("--model1", type=str, default="gpt-3.5-turbo")
+    parser.add_argument("--self_verif", type=str, default=0)
     parser.add_argument("--verbose", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--use_jit", type=bool, default=True)
