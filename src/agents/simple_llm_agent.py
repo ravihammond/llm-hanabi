@@ -2,6 +2,7 @@ from jax import numpy as jnp
 import json
 import numpy as np
 from textwrap import dedent
+from pprint import pprint
 
 from agents.base_llm_agent import BaseLLMAgent
 
@@ -53,32 +54,19 @@ class SimpleLLMAgent(BaseLLMAgent):
             f"{HANABI_RULES}"
         )
 
-    def _act(
-        self, 
-        obs, 
-        state, 
-        legal_moves, 
-        curr_player, 
-        prev_state, 
-        prev_action,
-    ):
-        legal_moves = self._env.get_legal_moves(state)
-        agent_str = f"agent_{self._player_idx}"
-        valid_actions = np.where(legal_moves[agent_str] == 1)[0]
-        result_actions = np.array([0, 0])
+    def _act(self, obs_vector, curr_player, turn, score, legal_moves):
+        valid_actions = np.where(legal_moves == 1)[0]
         if curr_player != self._player_idx:
-            result_actions[curr_player] = valid_actions[0]
-            print("result actions:", result_actions)
-            return result_actions
+            return valid_actions[0]
 
-        obs = self._state_to_obs(state, prev_state, prev_action)
+        obs = self._obs_vector_to_obs(
+            obs_vector, legal_moves, turn, score)
         observation_prompt = self._observation_prompt(obs)
         prompt= observation_prompt
         prompt += dedent(
-            f"\nPlease consider this entire observation and decide on the best next action to take. You cannot play or discard cards from your teammates' hands. Only play cards from your hand if you believe they are playable right now.\n"
+            f"\nPlease consider this entire observation and decide on the best next action to take. You cannot play or discard cards from your teammates' hands. Only play a card from your hand if you know that there is a logical reason why it is definitely 100% playable right now.\n"
             f"Before playing a card, check the inferred color possibilities and the inferred rank possibilities for that card.\n"
-            f"When there are limited information tokens available, discard to gain more information tokens.\n"
-            f"When there is only one life remaining, be extra careful when playing, because playing a card that is not playable will lose the game.\n\n"
+            f"When there is only one life remaining be extra careful when playing, because playing a card that is not playable will lose the game.\n\n"
         )
         prompt += self._choose_name_instructions()
 
@@ -99,12 +87,20 @@ class SimpleLLMAgent(BaseLLMAgent):
             ).lower()
             action_id = ACTION_TO_ID[candidate_action_text]
 
-        result_actions[self._player_idx] = action_id
-        return result_actions
+        return action_id
 
     def _observation_prompt(self, obs):
-        # Header and General Information using obs directly.
-        prompt = dedent(f"""\
+        prompt = ""
+        prompt += self._build_header(obs)
+        prompt += self._build_discards_section(obs)
+        prompt += self._build_fireworks_section(obs)
+        prompt += self._build_last_action_section(obs)
+        prompt += self._build_hands_section(obs)
+        prompt += self._build_valid_actions_section(obs)
+        return prompt
+
+    def _build_header(self, obs):
+        header = dedent(f"""\
             ======================================
                         HANABI GAME STATE
             ======================================
@@ -112,30 +108,31 @@ class SimpleLLMAgent(BaseLLMAgent):
             GENERAL INFORMATION:
             --------------------------------------
             Score             : {obs.score:<3} (Number of cards successfully played)
-            Information Tokens: {obs.information_tokens:<3} (Clues available for giving hints)
+            Information Tokens: {obs.information_tokens:<3} (Number tokens available for giving hints)
             Lives Remaining   : {obs.lives:<3} (Mistakes allowed before game over)
             Cards in Deck     : {obs.cards_in_deck:<3} (Undealt cards remaining in the deck)
             Game Turn         : {obs.game_turn:<3} (This is the {ordinal(obs.game_turn)} move of the game)
 
             DISCARDS:
             --------------------------------------
-            """)
+        """)
+        return header
 
+    def _build_discards_section(self, obs):
+        section = ""
         if obs.discards:
-            prompt += dedent("""\
+            section += dedent("""\
                 *Note: Discarded cards (from misplays or voluntary discarding) would be listed here in order of discard.
                 """)
-
-        # Discards section: List one card per row.
-        if not obs.discards:
-            prompt += dedent("(No cards have been discarded yet)\n")
-        else:
             for card in obs.discards:
-                prompt += f" - {card}\n"
-        prompt += "\n"
+                section += f" - {card}\n"
+        else:
+            section += dedent("(No cards have been discarded yet)\n")
+        section += "\n"
+        return section
 
-        # Fireworks section exactly as specified.
-        prompt += dedent("""\
+    def _build_fireworks_section(self, obs):
+        section = dedent("""\
             FIREWORKS:
             --------------------------------------
             *Note: Each firework pile must be built in ascending order from 1 to 5.
@@ -143,73 +140,75 @@ class SimpleLLMAgent(BaseLLMAgent):
         """)
         for color_id in range(5):
             current = obs.fireworks[color_id]
-            # Determine next card needed if the stack is not finished.
             if current < 5:
                 next_card_str = f"{ID_TO_COLOUR[color_id]} {current + 1}"
                 next_card = f"{next_card_str:<8}"
             else:
                 next_card = "Stack is finished"
-            # Append the note if the next card needed is rank 1 (i.e. nothing has been played).
             note = "   (No card played yet)" if current == 0 else ""
-            prompt += f"{ID_TO_COLOUR[color_id]} Fireworks: The next card needed for the {ID_TO_COLOUR[color_id]} firework pile is {next_card}{note}\n"
+            section += f"{ID_TO_COLOUR[color_id]} Fireworks: The next card needed for the {ID_TO_COLOUR[color_id]} firework pile is {next_card}{note}\n"
+        return section
 
-        # Print last action
+    def _build_last_action_section(self, obs):
+        section = ""
         if obs.game_turn > 0:
-            prompt += dedent(
+            section += dedent(
                 f"\nLAST ACTION\n"
                 "--------------------------------------\n"
-                "*Note: This is the action taken by your teammate on the previous turn."
+                "*Note: This is the action taken by your teammate on the previous turn. "
                 "The board state above already incorporates the effects of this action.\n"
             )
-
             last_action = obs.last_action  # Already transformed as needed
             move = last_action["move_type"]
-            prompt += f"Last Action Type: {move}\n"
+            section += f"Last Action Type: {move}\n"
 
             if move in ["Play", "Discard"]:
                 header = "Play Details:" if move == "Play" else "Discard Details:"
-                prompt += header + "\n"
+                section += header + "\n"
                 action_word = "Played" if move == "Play" else "Discarded"
-                prompt += f"  - {action_word} Card Index: Card slot {last_action['pos_played_discarded']}\n"
-                prompt += f"  - Card Identity: {last_action['played_discarded_card']}\n"
+                section += f"  - {action_word} Card Index: Card slot {last_action['pos_played_discarded']}\n"
+                section += f"  - Card Identity: {last_action['played_discarded_card']}\n"
                 if move == "Play":
                     outcome_str = "Successful (Added 1 to the score)" if last_action["card_played_score"] else "Failed"
-                    prompt += f"  - Play Outcome: {outcome_str}\n"
+                    section += f"  - Play Outcome: {outcome_str}\n"
                 if move == "Discard" or last_action["added_info_tokens"] > 0:
-                    prompt += f"  - Information Token: 1 new information token added\n"
+                    section += f"  - Information Token: 1 new information token added\n"
             elif move in ["Hint Colour", "Hint Rank"]:
-                prompt += "Hint Details:\n"
+                section += "Hint Details:\n"
                 hint_given = last_action["color_revealed"] if move == "Hint Colour" else last_action["rank_revealed"]
-                prompt += f"  - Hint Given: {hint_given}\n"
+                section += f"  - Hint Given: {hint_given}\n"
                 affected_str = f"[{', '.join(last_action['reveal_outcome'])}]"
-                prompt += f"  - Affected Cards in Your Hand: {affected_str}\n"
+                section += f"  - Affected Cards in Your Hand: {affected_str}\n"
+        return section
 
-        # Print hands
+    def _build_hands_section(self, obs):
+        section = ""
         hand_order = [
-            (obs.hand_info[self._player_idx], "YOUR HAND", "*Note: You cannot see your own card identities; the information below shows only the clues you have received and the inferred possibilities regarding your own cards.", False),
-            (obs.hand_info[(self._player_idx + 1) % self._env.num_agents], "TEAMMATE'S HAND", "*Note: You know your teammate's actual card identities. However, the clue information and inferred possibilities below represent what your teammate perceives about their own cards.", True)
+            (obs.hand_info[self._player_idx],
+             "YOUR HAND",
+             "*Note: You cannot see your own card identities; the information below shows only the hints you have received and the inferred possibilities regarding your own cards.",
+             False),
+            (obs.hand_info[(self._player_idx + 1) % self._env.num_agents],
+             "TEAMMATE'S HAND",
+             "*Note: You know your teammate's actual card identities. However, the hint information and inferred possibilities below represent what your teammate perceives about their own cards.",
+             True)
         ]
-
-        # Loop over each hand in the desired order.
         for hand, header_title, header_note, show_identity in hand_order:
-            prompt += dedent(f"""
+            section += dedent(f"""
                 {header_title}:
                 --------------------------------------
                 {header_note}:
             """)
-
-            # Loop over each card in the hand.
             for i, card in enumerate(hand):
-                prompt += f"Card slot {i}:"
+                section += f"Card slot {i}:"
                 if show_identity:
-                    pass
-                    # prompt += " (This card is in your teammate's hand, not your hand, so you can not play this card)"
-                else: 
-                    prompt += f" (If you play your card in slot {i}, this is the card you will play)"
-                prompt += "\n"
+                    section += " (This card is in your teammate's hand, not your hand, so you can not play this card)"
+                else:
+                    section += f" (If you play your card in slot {i}, this is the card you will play)"
+                section += "\n"
                 if show_identity:
-                    prompt += f"  - Known Card Identity: {card['card_identity']} (You can not play this card)\n"
-                prompt += f"  - Clue Information: Colour Hint: {card['color_hint']}; Number Hint: {card['rank_hint']}\n"
+                    section += f"  - Known Card Identity: {card['card_identity']} (You can not play this card)\n"
+                section += f"  - Hint Information: Colour Hint: {card['color_hint']}; Number Hint: {card['rank_hint']}\n"
 
                 possible_colors = card["possible_colors"]
                 possible_ranks = card["possible_ranks"]
@@ -224,21 +223,20 @@ class SimpleLLMAgent(BaseLLMAgent):
                     ranks_line = f"      • Ranks: The card is definitely rank {possible_ranks[0]}"
                 else:
                     ranks_line = f"      • Ranks: The card could be any of these ranks {possible_ranks}"
-                prompt += "  - Inferred Possibilities:\n" + colors_line + "\n" + ranks_line + "\n"
+                section += "  - Inferred Possibilities:\n" + colors_line + "\n" + ranks_line + "\n"
+        return section
 
-        # Legal moves
-        prompt += dedent(
+    def _build_valid_actions_section(self, obs):
+        section = dedent(
             "\nVALID ACTIONS:\n"
             "--------------------------------------\n"
             "*Note: Here is a list of all the valid actions you can currently take. When you select an action from this list, say the action EXACTLY as it is written here.\n"
         )
-        prompt += self._get_legal_moves_text(obs) + "\n"
-
-        return prompt
+        section += self._get_legal_moves_text(obs) + "\n"
+        return section
 
     def _get_legal_moves_text(self, obs):
-        agent_str = f"agent_{self._player_idx}"
-        valid_actions = np.where(obs.legal_moves[agent_str] == 1)[0]
+        valid_actions = np.where(obs.legal_moves == 1)[0]
         legal_moves_lines = [
             f"  - {ID_TO_ACTION[action]}"
             for action in valid_actions
@@ -249,6 +247,7 @@ class SimpleLLMAgent(BaseLLMAgent):
         candidate_action = ID_TO_ACTION[initial_action_id].lower()
 
         for attempt in range(self._max_verification_attempts):
+            # Verification
             verification_prompt = self._build_verification_prompt(
                 candidate_action, state_description, attempt
             )
@@ -263,6 +262,7 @@ class SimpleLLMAgent(BaseLLMAgent):
             if verification_result.lower() == "okay":
                 return candidate_action
 
+            # Alternative action
             prompt = self._build_alternative_prompt(
                 candidate_action, verification_response, obs)
             prompt += self._choose_name_instructions()

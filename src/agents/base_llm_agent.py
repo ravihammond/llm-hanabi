@@ -6,6 +6,7 @@ import chex
 from typing import Dict
 from easydict import EasyDict as edict
 from textwrap import dedent
+from pprint import pprint
 
 from agents.agent import Agent
 from agents.llm_model_wrapper import LLMModelWrapper
@@ -15,6 +16,18 @@ from agents.mappings import (
     ID_TO_RANK,
     FULL_COLOUR_NAMES
 )
+
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 
 class BaseLLMAgent(Agent):
@@ -52,28 +65,208 @@ class BaseLLMAgent(Agent):
             "with the plain text, and don't wrap the JSON with ``` characters."
         )
 
-    def _state_to_obs(self, state, prev_state, prev_action):
-        obs = edict()
-        obs.game_turn = state.turn
-        obs.score = state.score
-        obs.information_tokens = int(state.info_tokens.sum())
-        obs.lives = int(state.life_tokens.sum())
-        obs.cards_in_deck = int(state.deck.sum())
-        obs.discards = [ 
-            self._card_to_string(card)
-            for card in state.discard_pile
-            if self._card_to_string(card) != ""
-        ]
-        obs.fireworks = [
-            self._card_to_rank(card)
-            for card in self._fireworks(state)
-        ]
-        obs.hand_info = self._get_actor_hand_info(state)
-        if state.turn > 0:
-            obs.last_action = self._get_last_action(state, prev_state, prev_action)
-        obs.legal_moves = self._extract_legal_moves(state)
+    def _obs_vector_to_obs(self, obs_vector, legal_moves, game_turn, score):
+        env = self._env
 
+        # Get sizes from the environment.
+        hands_n    = env.hands_n_feats
+        board_n    = env.board_n_feats
+        discards_n = env.discards_n_feats
+        last_act_n = env.last_action_n_feats
+        belief_n   = env.v0_belief_n_feats
+
+        # Split the vector into its segments.
+        segments = self._split_obs_vector(
+            obs_vector, hands_n, board_n, discards_n, last_act_n, belief_n)
+
+        # Decode board features.
+        board_info = self._decode_board_feats(segments["board"], env)
+        # Decode discards.
+        discards = self._decode_discards(segments["discards"], env)
+        # Decode last action.
+        last_action = self._decode_last_action(segments["last_action"], env)
+        # Decode belief features.
+        belief_array = self._decode_belief(segments["belief"], env)
+        # Decode hand information (using both raw hands and belief info).
+        hand_info = self._decode_hand_info(
+            segments["hands"], belief_array, env, self._player_idx)
+
+        # Build final observation dictionary.
+        obs = edict()
+        obs.game_turn = game_turn
+        obs.score = score
+        obs.information_tokens = board_info["info_tokens"]
+        obs.lives = board_info["life_tokens"]
+        obs.cards_in_deck = board_info["cards_in_deck"]
+        obs.fireworks = board_info["fireworks"]
+        obs.discards = discards
+        obs.hand_info = hand_info
+        if game_turn > 0:
+            obs.last_action = last_action
+        obs.legal_moves = legal_moves
         return obs
+
+    def _split_obs_vector(self, obs_vector, hands_n, board_n, discards_n, last_act_n, belief_n):
+        idx = 0
+        segments = {}
+        segments["hands"] = obs_vector[idx: idx + hands_n]
+        idx += hands_n
+        segments["board"] = obs_vector[idx: idx + board_n]
+        idx += board_n
+        segments["discards"] = obs_vector[idx: idx + discards_n]
+        idx += discards_n
+        segments["last_action"] = obs_vector[idx: idx + last_act_n]
+        idx += last_act_n
+        segments["belief"] = obs_vector[idx: idx + belief_n]
+        idx += belief_n
+        return segments
+
+    def _decode_board_feats(self, board_feats, env):
+        board_n = env.board_n_feats
+        deck_seg_len = board_n - (env.num_colors * env.num_ranks + env.max_info_tokens + env.max_life_tokens)
+        deck_feats = board_feats[:deck_seg_len]
+        cards_in_deck = int(np.sum(deck_feats))
+
+        fireworks_seg_len = env.num_colors * env.num_ranks
+        fireworks_flat = board_feats[deck_seg_len: deck_seg_len + fireworks_seg_len]
+        if fireworks_flat.size != fireworks_seg_len:
+            fireworks_arr = np.zeros((env.num_colors, env.num_ranks))
+        else:
+            fireworks_arr = np.array(fireworks_flat).reshape(env.num_colors, env.num_ranks)
+
+        # Helper: convert one-hot row into rank (0 if no card played)
+        def onehot_to_rank(row):
+            if np.sum(row) == 0:
+                return 0
+            return int(np.argmax(row) + 1)
+        fireworks = [onehot_to_rank(row) for row in fireworks_arr]
+
+        info_tokens_start = deck_seg_len + fireworks_seg_len
+        info_tokens_vec = board_feats[info_tokens_start: info_tokens_start + env.max_info_tokens]
+        life_tokens_vec = board_feats[info_tokens_start + env.max_info_tokens: info_tokens_start + env.max_info_tokens + env.max_life_tokens]
+        info_tokens = int(np.sum(info_tokens_vec))
+        life_tokens = int(np.sum(life_tokens_vec))
+
+        return {
+            "cards_in_deck": cards_in_deck,
+            "fireworks": fireworks,
+            "info_tokens": info_tokens,
+            "life_tokens": life_tokens,
+        }
+
+    def _decode_discards(self, discard_feats, env):
+        total_cards_per_color = int(np.sum(env.num_cards_of_rank))
+        discards_matrix = np.array(discard_feats).reshape(env.num_colors, total_cards_per_color)
+        discards = []
+        for color in range(env.num_colors):
+            start_idx = 0
+            for rank in range(env.num_ranks):
+                seg_length = env.num_cards_of_rank[rank]
+                segment = discards_matrix[color, start_idx: start_idx + seg_length]
+                count = int(np.sum(segment))
+                for _ in range(count):
+                    discards.append(f"{ID_TO_COLOUR[color]} {ID_TO_RANK[rank]}")
+                start_idx += seg_length
+        return discards
+
+    def _decode_last_action(self, last_action_feats, env):
+        la_idx = 0
+        la = last_action_feats
+        la_idx += env.num_agents  # skip acting_player_relative_index.
+        move_type_onehot = la[la_idx: la_idx + 4]
+        la_idx += 4
+        la_idx += env.num_agents  # skip target_player_relative_index.
+        color_revealed_onehot = la[la_idx: la_idx + env.num_colors]
+        la_idx += env.num_colors
+        rank_revealed_onehot = la[la_idx: la_idx + env.num_ranks]
+        la_idx += env.num_ranks
+        reveal_outcome_seg = la[la_idx: la_idx + env.hand_size]
+        la_idx += env.hand_size
+        pos_played_discarded_seg = la[la_idx: la_idx + env.hand_size]
+        la_idx += env.hand_size
+        played_discarded_card_flat = la[la_idx: la_idx + env.num_colors * env.num_ranks]
+        la_idx += env.num_colors * env.num_ranks
+        card_played_score_val = int(la[la_idx])
+        la_idx += 1
+        added_info_tokens_val = int(la[la_idx])
+        la_idx += 1
+
+        move_types = ["Play", "Discard", "Hint Colour", "Hint Rank"]
+        move_type = move_types[int(np.argmax(move_type_onehot))] if np.sum(move_type_onehot) > 0 else None
+
+        colour_names = ["Red", "Yellow", "Green", "White", "Blue"]
+        color_revealed = colour_names[int(np.argmax(color_revealed_onehot))] if np.sum(color_revealed_onehot) > 0 else None
+        rank_revealed = int(np.argmax(rank_revealed_onehot)) + 1 if np.sum(rank_revealed_onehot) > 0 else None
+
+        reveal_outcome = [f"Card slot {i}" for i, val in enumerate(reveal_outcome_seg) if val > 0]
+        pos_played_discarded = int(np.argmax(pos_played_discarded_seg)) if np.sum(pos_played_discarded_seg) > 0 else None
+        card_array = np.array(played_discarded_card_flat).reshape(env.num_colors, env.num_ranks)
+        played_discarded_card = self._card_to_string(card_array) if pos_played_discarded is not None else None
+
+        return {
+            "added_info_tokens": added_info_tokens_val,
+            "card_played_score": bool(card_played_score_val),
+            "color_revealed": color_revealed,
+            "move_type": move_type,
+            "played_discarded_card": played_discarded_card,
+            "pos_played_discarded": pos_played_discarded,
+            "rank_revealed": rank_revealed,
+            "reveal_outcome": reveal_outcome,
+        }
+
+    def _decode_belief(self, belief_feats, env):
+        return np.array(belief_feats).reshape(
+            env.num_agents,
+            env.hand_size,
+            env.num_colors * env.num_ranks + env.num_colors + env.num_ranks
+        )
+
+    def _decode_hand_info(self, hands_feats, belief_array, env, player_idx):
+        hand_info = [None] * env.num_agents
+
+        # For a 2-agent game, extract the raw hand for the opponent.
+        if env.num_agents > 1:
+            other_hands_len = (env.num_agents - 1) * env.hand_size * (env.num_colors * env.num_ranks)
+            other_hands_flat = hands_feats[:other_hands_len]
+            other_hands = np.array(other_hands_flat).reshape(env.num_agents - 1, env.hand_size, env.num_colors, env.num_ranks)
+        else:
+            other_hands = None
+
+        # Loop over absolute agent indices.
+        for agent in range(env.num_agents):
+            agent_hand = []
+            for card_idx in range(env.hand_size):
+                # Extract belief for this card.
+                belief_card = belief_array[agent, card_idx, :]
+                knowledge_part = belief_card[: env.num_colors * env.num_ranks].reshape(env.num_colors, env.num_ranks)
+                color_hint_part = belief_card[env.num_colors * env.num_ranks: env.num_colors * env.num_ranks + env.num_colors]
+                rank_hint_part = belief_card[env.num_colors * env.num_ranks + env.num_colors:]
+                if np.any(color_hint_part > 0):
+                    ch_index = int(np.argmax(color_hint_part))
+                    color_hint = FULL_COLOUR_NAMES.get(env.color_map[ch_index], env.color_map[ch_index])
+                else:
+                    color_hint = "None"
+                if np.any(rank_hint_part > 0):
+                    rank_hint = str(int(np.argmax(rank_hint_part)) + 1)
+                else:
+                    rank_hint = "None"
+                possible_colors = [FULL_COLOUR_NAMES.get(env.color_map[i], env.color_map[i])
+                                   for i in range(env.num_colors) if np.any(knowledge_part[i] > 0)]
+                possible_ranks = [i+1 for i in range(env.num_ranks) if np.any(knowledge_part[:, i] > 0)]
+                card_info = {
+                    "color_hint": color_hint,
+                    "rank_hint": rank_hint,
+                    "possible_colors": possible_colors,
+                    "possible_ranks": possible_ranks,
+                }
+                # For agents that are not the current agent, include the card identity.
+                if agent != player_idx and other_hands is not None:
+                    # For a 2-agent game, the opponent's hand is always at index 0.
+                    card_info["card_identity"] = self._card_to_string(other_hands[0, card_idx])
+                agent_hand.append(card_info)
+            hand_info[agent] = agent_hand
+
+        return hand_info
 
     def _card_to_string(self, card: chex.Array) -> str:
         if ~card.any():
@@ -81,128 +274,3 @@ class BaseLLMAgent(Agent):
         color = int(jnp.argmax(card.sum(axis=1), axis=0))
         rank = int(jnp.argmax(card.sum(axis=0), axis=0))
         return f"{ID_TO_COLOUR[color]} {ID_TO_RANK[rank]}"
-
-    def _card_to_rank(self, card: chex.Array) -> int:
-        if ~card.any():
-            return 0
-        color = int(jnp.argmax(card.sum(axis=1), axis=0))
-        rank = int(jnp.argmax(card.sum(axis=0), axis=0))
-        return ID_TO_RANK[rank]
-
-    def _fireworks(self, state):
-        keep_only_last_one = lambda x: jnp.where(
-            jnp.arange(x.size) < (x.size - 1 - jnp.argmax(jnp.flip(x))),  # last argmax
-            0,
-            x,
-        )
-        fireworks = jax.vmap(keep_only_last_one)(state.fireworks)
-        return [
-            jnp.zeros((self._env.num_colors, self._env.num_ranks)).at[i].set(fireworks[i])
-            for i in range(self._env.num_colors)
-        ]
-
-
-    def _get_actor_hand_info(self, state) -> list:
-        all_hands = []
-
-        for player in range(self._env.num_agents):
-            hand_info = []
-            colors_revealed = np.array(state.colors_revealed[player])
-            ranks_revealed = np.array(state.ranks_revealed[player])
-            knowledge = np.array(
-                state.card_knowledge[player].reshape(
-                    self._env.hand_size, self._env.num_colors, self._env.num_ranks
-                )
-            )
-
-            # For teammates' hand, reveal card identity.
-            if self._player_idx != player:
-                actor_hand = np.array(state.player_hands[player])
-
-            for card_idx in range(self._env.hand_size):
-                color_hint_arr = colors_revealed[card_idx]
-                if color_hint_arr.any():
-                    letter = self._env.color_map[int(np.argmax(color_hint_arr))]
-                    color_hint = FULL_COLOUR_NAMES.get(letter, letter)
-                else:
-                    color_hint = "None"
-
-                rank_hint_arr = ranks_revealed[card_idx]
-                if rank_hint_arr.any():
-                    rank_hint = str(int(np.argmax(rank_hint_arr) + 1))
-                else:
-                    rank_hint = "None"
-
-                card_knowledge = knowledge[card_idx]
-                color_possible_mask = card_knowledge.any(axis=1)
-                possible_colors = [
-                    FULL_COLOUR_NAMES.get(self._env.color_map[i], self._env.color_map[i])
-                    for i, poss in enumerate(color_possible_mask) if poss
-                ]
-                rank_possible_mask = card_knowledge.any(axis=0)
-                possible_ranks = [i + 1 for i, poss in enumerate(rank_possible_mask) if poss]
-
-                card_info = {
-                    "color_hint": color_hint,
-                    "rank_hint": rank_hint,
-                    "possible_colors": possible_colors,
-                    "possible_ranks": possible_ranks,
-                }
-                if self._player_idx != player:
-                    card_info["card_identity"] = self._card_to_string(actor_hand[card_idx])
-                hand_info.append(card_info)
-
-            all_hands.append(hand_info)
-
-        return all_hands
-
-    def _get_last_action(self, state, prev_state, prev_action) -> Dict:
-        last_actions_feats = self._env.get_last_action_feats_(self._player_idx, prev_state, state, prev_action)
-        colour_names = ["Red", "Yellow", "Green", "White", "Blue"]
-        move_types = ["Play", "Discard", "Hint Colour", "Hint Rank"]
-
-        last_action = {}
-        last_action["added_info_tokens"] = int(last_actions_feats["added_info_tokens"][0])
-        last_action["card_played_score"] = bool(last_actions_feats["card_played_score"][0])
-
-        color_vec = last_actions_feats["color_revealed"]
-        last_action["color_revealed"] = None
-        if color_vec.sum() > 0:
-            color_index = int(color_vec.argmax())
-            last_action["color_revealed"] = colour_names[color_index]
-
-        move_vec = last_actions_feats["move_type"]
-        last_action["move_type"] = None
-        if move_vec.sum() > 0:
-            move_index = int(move_vec.argmax())
-            last_action["move_type"] = move_types[move_index]
-
-        played_discarded_vec = last_actions_feats["played_discarded_card"]
-        last_action["played_discarded_card"] = None
-        if played_discarded_vec.sum() > 0:
-            card_index = int(played_discarded_vec.argmax())
-            last_action["played_discarded_card"] = ID_TO_CARD[card_index]
-
-        pos_played_discarded_vec = last_actions_feats["pos_played_discarded"]
-        last_action["pos_played_discarded"] = None
-        if pos_played_discarded_vec.sum() > 0:
-            pos_index = int(pos_played_discarded_vec.argmax())
-            last_action["pos_played_discarded"] = pos_index
-
-        rank_revealed_vec = last_actions_feats["rank_revealed"]
-        last_action["rank_revealed"] = None
-        if rank_revealed_vec.sum() > 0:
-            rank_index = int(rank_revealed_vec.argmax())
-            last_action["rank_revealed"] = rank_index + 1
-
-        outcome_vec = last_actions_feats["reveal_outcome"]
-        affected_cards = []
-        for i, val in enumerate(outcome_vec):
-            if val == 1:
-                affected_cards.append(f"Card slot {i}")
-        last_action["reveal_outcome"] = affected_cards
-
-        return last_action
-
-    def _extract_legal_moves(self, state):
-        return self._env.get_legal_moves(state)

@@ -9,40 +9,14 @@ class Agent(ABC):
         self._env = env
         self._player_idx = player_idx
 
-    def act(
-        self,
-        obs,
-        env_state,
-        legal_moves,
-        curr_player,
-        prev_state,
-        prev_action,
-    ):
-        obs = batchify(obs, self._env)
-        legal_moves = batchify(legal_moves, self._env)
+    def act(self, obs, curr_player, turn, score, legal_moves):
         if curr_player != self._player_idx:
-            return np.array([20, 20])
-        actions = self._act(
-            obs,
-            env_state,
-            legal_moves,
-            curr_player,
-            prev_state,
-            prev_action,
-        )
+            return len(legal_moves) - 1
+
+        actions = self._act(obs, curr_player, turn, score, legal_moves)
+
         return actions
 
-    def _act(
-        self,
-        obs,
-        state,
-        legal_moves,
-        curr_player,
-        prev_state,
-        prev_action,
-    ):
+    def _act(self, obs, curr_player, turn, score, legal_moves):
         return NotImplementedError
-
-def batchify(x, env):
-    return jnp.stack([x[agent] for agent in env.agents])
 

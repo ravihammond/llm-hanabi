@@ -31,17 +31,12 @@ def run_game(args):
 
     agents = get_agents(args, env)
 
-    working_memory = [None, None]
-    episodic_memory = [None, None]
-
     use_jit = args.use_jit if args.use_jit is not None else True
     with jax.disable_jit(not use_jit):
 
         rng = jax.random.PRNGKey(seed)
         rng, _rng = jax.random.split(rng)
 
-        prev_state = None
-        prev_action = None
         obs, env_state = env.reset(_rng)
         legal_moves = env.get_legal_moves(env_state)
 
@@ -65,30 +60,28 @@ def run_game(args):
 
             curr_player = np.where(env_state.cur_player_idx == 1)[0][0]
 
-            actions_all = [
+            actions = [
                 agents[i].act(
-                    obs,
-                    env_state,
-                    legal_moves,
-                    curr_player,
-                    prev_state,
-                    prev_action,
+                    obs[f"agent_{i}"], 
+                    curr_player, 
+                    env_state.turn, 
+                    env_state.score, 
+                    legal_moves[f"agent_{i}"]
                 )
                 for i in range(len(env.agents))
             ]
 
-            actions = actions_all[curr_player]
-            prev_action = int(actions[curr_player])
-            print(f"Action played: {env.action_encoding[int(actions[curr_player])]}")
+            action = actions[curr_player]
+            print(f"Action played: {env.action_encoding[action]}")
 
-            actions = {
+            env_actions = {
                 agent: jnp.array(actions[i]) for i, agent in enumerate(env.agents)
             }
 
-            prev_state = env_state
             rng, env_state, obs, reward, dones, legal_moves = _step_env(
-                rng, env_state, actions
+                rng, env_state, env_actions
             )
+            print("obs new size:", obs["agent_0"].shape)
 
             done = dones["__all__"]
             cum_rew += reward["__all__"]
